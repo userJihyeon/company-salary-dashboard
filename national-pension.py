@@ -6,29 +6,20 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 import streamlit as st
+import gdown
 
 # 한글 폰트 설정
-# plt.rcParams['font.family'] = "AppleGothic"
-# Windows, 리눅스 사용자
-plt.rcParams['font.family'] = "Malgun Gothic"
+plt.rcParams['font.family'] = "NanumGothic"
 plt.rcParams['axes.unicode_minus'] = False
 
 class PensionData():
-    # 수정 전
-    # def __init__(self, filepath):
-    #     self.df = pd.read_csv(os.path.join(filepath), encoding='cp949')
-    #     self.pattern1 = '(\([^)]+\))'
-    #     self.pattern2 = '(\[[^)]+\])'
-    #     self.pattern3 = '[^A-Za-z0-9가-힣]'
-    #     self.preprocess()
-    # 수정 후
-    def __init__(self, uploaded_file):  # ← filepath → uploaded_file
-        self.df = pd.read_csv(uploaded_file, encoding='cp949')  # ← os.path.join 제거
+    def __init__(self, filepath):
+        self.df = pd.read_csv(filepath, encoding='cp949')  # os.path.join 제거
         self.pattern1 = '(\([^)]+\))'
         self.pattern2 = '(\[[^)]+\])'
         self.pattern3 = '[^A-Za-z0-9가-힣]'
         self.preprocess()
-
+          
     def preprocess(self):
         self.df.columns = [
             '자료생성년월', '사업장명', '사업자등록번호', '가입상태', '우편번호',
@@ -40,16 +31,15 @@ class PensionData():
         ]
         df = self.df.drop(['자료생성년월', '우편번호', '사업장지번상세주소', '고객법정동주소코드', '고객행정동주소코드', '사업장형태구분코드 1 법인 2 개인', '적용일자', '재등록일자'], axis=1)
         df['사업장명'] = df['사업장명'].apply(self.preprocessing)
-        df['탈퇴일자_연도'] =  pd.to_datetime(df['탈퇴일자']).dt.year
-        df['탈퇴일자_월'] =  pd.to_datetime(df['탈퇴일자']).dt.month
+        df['탈퇴일자_연도'] = pd.to_datetime(df['탈퇴일자']).dt.year
+        df['탈퇴일자_월'] = pd.to_datetime(df['탈퇴일자']).dt.month
         df['시도'] = df['주소'].str.split(' ').str[0]
         df = df.loc[df['가입상태'] == 1].drop(['가입상태', '탈퇴일자'], axis=1).reset_index(drop=True)
         df['인당금액'] = df['금액'] / df['가입자수']
-        df['월급여추정'] =  df['인당금액'] / 9 * 100
+        df['월급여추정'] = df['인당금액'] / 9 * 100
         df['연간급여추정'] = df['월급여추정'] * 12
         self.df = df
 
-        
     def preprocessing(self, x):
         x = re.sub(self.pattern1, '', x)
         x = re.sub(self.pattern2, '', x)
@@ -79,18 +69,15 @@ class PensionData():
     def get_data(self):
         return self.df
 
-# 수정 전
-# @ st.cache_data
-# def read_pensiondata():
-#     data = PensionData('./data/national-pension.csv')
-#     return data
-# data = read_pensiondata()
-# 수정 후
-uploaded_file = st.file_uploader('CSV 파일을 업로드해 주세요', type='csv')
-data = None
-if uploaded_file is not None:
-    data = PensionData(uploaded_file)
+@st.cache_resource  # ✅ cache_data → cache_resource (커스텀 클래스 직렬화 문제 해결)
+def read_pensiondata():
+    file_id = '1UPNnu29JtZsJDNQsXT_TbrBJtbvMXEqn'
+    url = f'https://drive.google.com/uc?id={file_id}'
+    gdown.download(url, 'national-pension.csv', quiet=False, fuzzy=True)  # ✅ gdown으로 드라이브 경고 우회
+    data = PensionData('national-pension.csv')
+    return data
 
+data = read_pensiondata()
 company_name = st.text_input('회사명을 입력해 주세요', placeholder='검색할 회사명 입력')
 
 if data and company_name:
@@ -110,10 +97,8 @@ if data and company_name:
         col1, col2, col3 = st.columns(3)
         col1.text('월급여 추정')
         col1.markdown(f"`{int(output.iloc[0]['월급여추정']):,}` 원")
-
         col2.text('연봉 추정')
         col2.markdown(f"`{int(output.iloc[0]['연간급여추정']):,}` 원")
-
         col3.text('가입자수 추정')
         col3.markdown(f"`{int(output.iloc[0]['가입자수']):,}` 명")
 
@@ -127,7 +112,7 @@ if data and company_name:
         percent_value = info['월급여추정'] / comp_output.iloc[0, 0] * 100 - 100
         diff_month = abs(comp_output.iloc[0, 0] - info['월급여추정'])
         diff_year = abs(comp_output.iloc[1, 0] - info['연간급여추정'])
-        upordown = '높은' if percent_value > 0 else '낮은' 
+        upordown = '높은' if percent_value > 0 else '낮은'
 
         st.markdown(f"""
         - 업종 **평균 월급여**는 `{int(comp_output.iloc[0, 0]):,}` 원, **평균 연봉**은 `{int(comp_output.iloc[1, 0]):,}` 원 입니다.
@@ -136,7 +121,6 @@ if data and company_name:
         """)
 
         fig, ax = plt.subplots(1, 2)
-
         p1 = ax[0].bar(x=["Average", "Your Company"], height=(comp_output.iloc[0, 0], info['월급여추정']), width=0.7)
         ax[0].bar_label(p1, fmt='%d')
         p1[0].set_color('black')
@@ -159,9 +143,8 @@ if data and company_name:
         st.markdown('### 동종업계')
         df = data.get_data()
         st.dataframe(df.loc[df['업종코드'] == info['업종코드'], ['사업장명', '월급여추정', '연간급여추정', '가입자수']]\
-            .sort_values('연간급여추정', ascending=False).head(10).round(0), 
+            .sort_values('연간급여추정', ascending=False).head(10).round(0),
             use_container_width=True
         )
-        
     else:
         st.subheader('검색결과가 없습니다')
